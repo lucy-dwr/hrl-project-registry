@@ -8,7 +8,7 @@ import shutil
 import tempfile
 import zipfile
 from dataclasses import dataclass
-from datetime import date, datetime, timezone
+from datetime import date
 from pathlib import Path
 from xml.sax.saxutils import escape
 
@@ -134,7 +134,7 @@ def _sha256(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
-def _write_xlsx(path: Path, rows: list[dict[str, str]], generated_at: datetime) -> None:
+def _write_xlsx(path: Path, rows: list[dict[str, str]], generated_on: date) -> None:
     def cells(values: list[str], row: int) -> str:
         return "".join(
             f'<c r="{chr(65 + column)}{row}" t="inlineStr"><is><t>{escape(value)}</t></is></c>'
@@ -153,7 +153,7 @@ def _write_xlsx(path: Path, rows: list[dict[str, str]], generated_at: datetime) 
         "xl/_rels/workbook.xml.rels": '<?xml version="1.0" encoding="UTF-8"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/></Relationships>',
         "xl/worksheets/sheet1.xml": '<?xml version="1.0" encoding="UTF-8"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData>' + "".join(sheet_rows) + "</sheetData></worksheet>",
     }
-    stamp = generated_at.astimezone(timezone.utc).timetuple()[:6]
+    stamp = (generated_on.year, generated_on.month, generated_on.day, 0, 0, 0)
     with zipfile.ZipFile(path, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=9) as archive:
         for name, content in parts.items():
             info = zipfile.ZipInfo(name, stamp)
@@ -162,19 +162,19 @@ def _write_xlsx(path: Path, rows: list[dict[str, str]], generated_at: datetime) 
 
 
 def process_ready_source(
-    *, source_directory: Path, report_root: Path, candidate_root: Path, generated_at: datetime, previous_directory: Path | None = None
+    *, source_directory: Path, report_root: Path, candidate_root: Path, generated_on: date, previous_directory: Path | None = None
 ) -> ValidationResult:
     """Create a report and, only for a valid `_READY` revision, an approval candidate."""
     if not (source_directory / "_READY").is_file():
         raise ValueError("The source revision is not ready: _READY is required.")
     version = source_directory.name
     result = validate_source_revision(source_directory, previous_directory)
-    generated = generated_at.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    generated = generated_on.isoformat()
     report = {
         "source_registry": "hrl-project-registry",
         "registry_contract_version": REGISTRY_CONTRACT_VERSION,
         "source_revision": version,
-        "generated_at": generated,
+        "generated_on": generated,
         "row_count": len(result.rows),
         "status": "FAILED" if result.errors else "AWAITING_APPROVAL",
         "errors": result.errors,
@@ -199,14 +199,14 @@ def process_ready_source(
             writer = csv.DictWriter(file, fieldnames=PUBLIC_COLUMNS, lineterminator="\n")
             writer.writeheader()
             writer.writerows(result.rows)
-        _write_xlsx(xlsx_path, result.rows, generated_at)
+        _write_xlsx(xlsx_path, result.rows, generated_on)
         checksums = {path.name: _sha256(path) for path in (json_path, csv_path, xlsx_path)}
         manifest = {
             "source_registry": "hrl-project-registry",
             "registry_contract_version": REGISTRY_CONTRACT_VERSION,
             "source_revision": version,
             "export_version": version,
-            "generated_at": generated,
+            "generated_on": generated,
             "row_count": len(result.rows),
             "checksums": checksums,
         }

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import date
 from pathlib import Path
 
 import typer
@@ -15,7 +15,7 @@ def process_ready_source_command(
     report_root: Path = typer.Option(...),
     candidate_root: Path = typer.Option(...),
     previous_directory: Path | None = typer.Option(None),
-    generated_at: datetime | None = typer.Option(None, help="Optional UTC provenance timestamp."),
+    generated_on: date | None = typer.Option(None, help="Optional provenance date (YYYY-MM-DD)."),
 ) -> None:
     """Validate an uploaded `_READY` revision and create an approval candidate when valid."""
     result = process_ready_source(
@@ -23,7 +23,7 @@ def process_ready_source_command(
         report_root=report_root,
         candidate_root=candidate_root,
         previous_directory=previous_directory,
-        generated_at=generated_at or datetime.now(timezone.utc),
+        generated_on=generated_on or date.today(),
     )
     if result.errors:
         typer.echo("Registry source validation failed.", err=True)

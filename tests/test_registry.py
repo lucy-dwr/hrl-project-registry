@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import date
 from pathlib import Path
 
 from hrl_project_registry.registry import process_ready_source, validate_source_revision
@@ -25,7 +25,7 @@ def test_ready_source_creates_a_candidate_and_report(tmp_path: Path):
         source_directory=source,
         report_root=tmp_path / "reports",
         candidate_root=tmp_path / "candidates",
-        generated_at=datetime(2026, 8, 25, 1, 20, tzinfo=timezone.utc),
+        generated_on=date(2026, 8, 25),
     )
     candidate = tmp_path / "candidates/project-id-registry/2026-08-25"
     assert not result.errors

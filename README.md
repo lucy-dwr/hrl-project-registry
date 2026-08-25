@@ -37,7 +37,7 @@ Promotion after an `_APPROVE` marker is a separate job.
 
 Use an ISO date (`YYYY-MM-DD`) as the normal source and export version. If a
 same-day correction is necessary, use `YYYY-MM-DD-r2`, then `-r3`, rather than
-overwriting the earlier revision. The job records its own UTC generation time
+overwriting the earlier revision. The job records its own generation date
 in manifests and reports.
 
 ## Updating the registry
