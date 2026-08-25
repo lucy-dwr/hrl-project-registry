@@ -57,6 +57,19 @@ messages see that marker and are acknowledged without changing a source, candida
 If a job stops before the final marker is written, a retry completes the same immutable paths.
 The source revision is read-only after `_READY` and the worker never overwrites it.
 
+The promotion entry point receives one Event Grid `_APPROVE` message from the
+separate registry-promotion queue. It verifies the marker path, stages the
+candidate, uses the same checksum-verified promotion logic as the local
+command, uploads an immutable export, then conditionally updates `current.json`.
+It acknowledges the queue message only after that outcome is durable.
+
+```sh
+hrl-project-registry consume-promotion-queue \
+  --queue registry-promotion-requests \
+  --candidate-container registry-export-candidates \
+  --export-container registry-exports
+```
+
 Use an ISO date (`YYYY-MM-DD`) as the normal source and export version. If a
 same-day correction is necessary, use `YYYY-MM-DD-r2`, then `-r3`, rather than
 overwriting the earlier revision. The job records its own generation date

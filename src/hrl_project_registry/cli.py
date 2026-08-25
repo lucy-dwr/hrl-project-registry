@@ -67,3 +67,25 @@ def consume_validation_queue_command(
     worker = RegistryValidationWorker(account_url, queue, source_container, report_container, candidate_container, export_container, source_prefix)
     if not worker.process_one(_parse_date(generated_on)):
         typer.echo("No queue message available.")
+
+
+@app.command("consume-promotion-queue")
+def consume_promotion_queue_command(
+    account_url: str = typer.Option(..., envvar="HRL_STORAGE_ACCOUNT_URL"),
+    queue: str = typer.Option(...),
+    candidate_container: str = typer.Option(...),
+    export_container: str = typer.Option(...),
+    candidate_prefix: str = typer.Option("project-id-registry"),
+) -> None:
+    """Receive, promote, and acknowledge one approved registry candidate message."""
+    from .azure_worker import RegistryPromotionWorker
+
+    worker = RegistryPromotionWorker(
+        account_url,
+        queue,
+        candidate_container,
+        export_container,
+        candidate_prefix,
+    )
+    if not worker.process_one():
+        typer.echo("No queue message available.")
