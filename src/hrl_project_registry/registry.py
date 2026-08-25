@@ -52,6 +52,35 @@ def _is_iso_date(value: str) -> bool:
     return True
 
 
+def source_revision_key(value: str) -> tuple[date, int]:
+    """Return a sortable source-revision key after enforcing the naming contract."""
+    if not SOURCE_REVISION_PATTERN.fullmatch(value):
+        raise ValueError("Source revision must be YYYY-MM-DD or YYYY-MM-DD-r2 (or a later revision).")
+    revision_date = date.fromisoformat(value[:10])
+    suffix = value[10:]
+    return revision_date, int(suffix[2:]) if suffix else 1
+
+
+def _validate_revision_sequence(revision: str, previous_revision: str | None) -> str | None:
+    try:
+        revision_date, revision_number = source_revision_key(revision)
+    except ValueError:
+        return "Source revision must contain a real ISO date and optional -r2 (or a later revision)."
+    if previous_revision is None:
+        return None
+    try:
+        previous_date, previous_number = source_revision_key(previous_revision)
+    except ValueError:
+        return "Previous source revision has an invalid name."
+    if (revision_date, revision_number) <= (previous_date, previous_number):
+        return "Source revision must be later than the preceding approved revision."
+    if revision_date == previous_date and revision_number != previous_number + 1:
+        return "Same-day source revisions must increment consecutively (-r2, then -r3, and so on)."
+    if revision_date != previous_date and revision_number != 1:
+        return "The first source revision on a new day must not use an -rN suffix."
+    return None
+
+
 def validate_source_revision(source_directory: Path, previous_directory: Path | None = None) -> ValidationResult:
     """Validate a complete source revision uploaded after all files are present."""
     rows = _read_csv(source_directory / "project-id-registry.csv", PUBLIC_COLUMNS)
@@ -67,8 +96,10 @@ def validate_source_revision(source_directory: Path, previous_directory: Path | 
     if missing:
         errors.append(f"Source revision is missing required files: {', '.join(sorted(missing))}.")
     projects: dict[str, dict[str, str]] = {}
-    if not SOURCE_REVISION_PATTERN.fullmatch(revision):
-        errors.append("Source revision must be YYYY-MM-DD or YYYY-MM-DD-r2 (or a later revision).")
+    previous_revision = previous_directory.name if previous_directory is not None else None
+    sequence_error = _validate_revision_sequence(revision, previous_revision)
+    if sequence_error:
+        errors.append(sequence_error)
 
     for number, row in enumerate(rows, start=2):
         project_id = row["project_id"]
@@ -101,6 +132,10 @@ def validate_source_revision(source_directory: Path, previous_directory: Path | 
             errors.append(f"audit row {number}: all audit columns are required.")
         if event["action"] not in VALID_AUDIT_ACTIONS:
             errors.append(f"audit row {number}: invalid action {event['action']!r}.")
+        try:
+            source_revision_key(event["source_revision"])
+        except ValueError:
+            errors.append(f"audit row {number}: source_revision has an invalid name.")
         if event["source_revision"] == revision:
             revision_events[(event["project_id"], event["action"])] = number
 
@@ -279,8 +314,11 @@ def promote_candidate(*, candidate_directory: Path, export_root: Path) -> Path:
         if not isinstance(checksum, str) or _sha256(candidate_directory / name) != checksum:
             raise ValueError(f"candidate artifact checksum does not match: {name}")
     version = str(candidate_manifest.get("export_version", ""))
-    if not SOURCE_REVISION_PATTERN.fullmatch(version):
+    try:
+        source_revision_key(version)
+    except ValueError:
         raise ValueError("candidate manifest has an invalid export_version")
+
     if candidate_manifest.get("source_revision") != version:
         raise ValueError("candidate manifest source_revision and export_version must match")
     if status.get("source_revision") != version:
@@ -296,10 +334,19 @@ def promote_candidate(*, candidate_directory: Path, export_root: Path) -> Path:
         staging = Path(temporary)
         for name in sorted(checksums):
             shutil.copy2(candidate_directory / name, staging / name)
+        # Export manifests are shareable. Approval identity, source-revision
+        # provenance, and audit history remain in the private candidate/source
+        # areas and Azure's authenticated write audit trail.
         manifest = {
-            **candidate_manifest,
-            "approved_by": approval["approved_by"],
-            "approved_on": approval["approved_on"],
+            key: candidate_manifest[key]
+            for key in (
+                "source_registry",
+                "registry_contract_version",
+                "export_version",
+                "generated_on",
+                "row_count",
+                "checksums",
+            )
         }
         (staging / "manifest.json").write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n")
         (staging / "SHA256SUMS").write_text("".join(f"{digest}  {name}\n" for name, digest in sorted(checksums.items())))

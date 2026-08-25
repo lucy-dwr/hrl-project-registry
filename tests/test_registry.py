@@ -56,6 +56,17 @@ def test_candidate_promotion_is_immutable_and_idempotent(tmp_path: Path):
     (candidate / "_APPROVE").write_text(json.dumps({"export_version": "2026-08-25", "approved_by": "registry-admin", "approved_on": "2026-08-25", "candidate_manifest_sha256": digest}))
     destination = promote_candidate(candidate_directory=candidate, export_root=tmp_path / "exports")
     assert (destination / "manifest.json").is_file()
+    manifest = json.loads((destination / "manifest.json").read_text())
+    assert set(manifest) == {
+        "source_registry",
+        "registry_contract_version",
+        "export_version",
+        "generated_on",
+        "row_count",
+        "checksums",
+    }
+    assert "registry-admin" not in (destination / "manifest.json").read_text()
+    assert "Initial allocation" not in (destination / "project-id-registry.csv").read_text()
     assert promote_candidate(candidate_directory=candidate, export_root=tmp_path / "exports") == destination
 
 
@@ -302,3 +313,62 @@ def test_supersession_requires_current_audit_event(tmp_path: Path):
     )
     result = validate_source_revision(source, previous)
     assert "supersession needs a current-revision audit event" in " ".join(result.errors)
+
+
+@pytest.mark.parametrize(
+    ("version", "previous_version", "expected"),
+    [
+        ("2026-02-30", None, "real ISO date"),
+        ("2026-08-25-r2", "2026-08-24", "new day"),
+        ("2026-08-25-r3", "2026-08-25", "increment consecutively"),
+        ("2026-08-25-r3", "2026-08-25-r2", None),
+    ],
+)
+def test_source_revision_names_and_same_day_revisions(
+    tmp_path: Path, version: str, previous_version: str | None, expected: str | None
+):
+    previous = None
+    if previous_version:
+        previous = tmp_path / previous_version
+        write_revision(
+            previous,
+            "HRL-001,eligible,Example project,DWR,2026-08-24,\n",
+            f"{previous_version},registry-admin,allocated,HRL-001,Initial allocation\n",
+        )
+    source = tmp_path / version
+    write_revision(
+        source,
+        "HRL-001,eligible,Example project,DWR,2026-08-24,\n",
+        f"{version},unrecognized-local-actor,allocated,HRL-001,Initial allocation\n",
+    )
+    result = validate_source_revision(source, previous)
+    assert (expected is None) == (not result.errors)
+    if expected:
+        assert expected in " ".join(result.errors)
+
+
+def test_validation_does_not_depend_on_authorization_lookup(tmp_path: Path):
+    source = tmp_path / "2026-08-25"
+    write_revision(
+        source,
+        "HRL-001,eligible,Example project,DWR,2026-08-25,\n",
+        "2026-08-25,offline-test-actor,allocated,HRL-001,Initial allocation\n",
+    )
+    assert not validate_source_revision(source).errors
+
+
+def test_conditional_pointer_update_preserves_a_newer_export(tmp_path: Path):
+    blobs = _BlobService()
+    worker = object.__new__(RegistryPromotionWorker)
+    worker.blobs = blobs
+    worker.export_container = "registry-exports"
+    worker.candidate_prefix = "project-id-registry"
+    existing = {"export_version": "2026-08-25-r3", "manifest": "2026-08-25-r3/manifest.json"}
+    blobs.data[("registry-exports", "project-id-registry/current.json")] = json.dumps(existing).encode()
+    pointer = tmp_path / "current.json"
+    pointer.write_text(json.dumps({"export_version": "2026-08-25-r2", "manifest": "2026-08-25-r2/manifest.json"}))
+
+    with pytest.raises(ValueError, match="older export"):
+        worker._upload_current_pointer(pointer, "2026-08-25-r2")
+
+    assert json.loads(blobs.data[("registry-exports", "project-id-registry/current.json")]) == existing

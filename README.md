@@ -128,7 +128,10 @@ hrl-project-registry promote \
 `_APPROVE` must be a JSON object with `export_version`, `approved_by`, `approved_on` (an ISO
 date), and `candidate_manifest_sha256`. The command checks the candidate artifacts and manifest
 before creating the immutable versioned export and then updates the mutable `current.json`
-pointer. Its Storage Queue/Event Grid adapter is intentionally a later deployment task.
+pointer. Export CSV, JSON, XLSX, and manifest files are sanitized: they never include audit rows,
+approval identities, or source-revision metadata. Azure Storage's authenticated write audit trail
+is the approval identity record. Its Storage Queue/Event Grid adapter is intentionally a later
+deployment task.
 
 The validator rejects missing or duplicate IDs, removed prior IDs, invalid
 statuses, invalid supersession targets, malformed dates, and lifecycle changes

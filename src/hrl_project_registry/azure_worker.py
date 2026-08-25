@@ -12,7 +12,7 @@ from azure.identity import DefaultAzureCredential
 from azure.storage.blob import BlobServiceClient
 from azure.storage.queue import QueueClient
 
-from .registry import SOURCE_REVISION_PATTERN, process_ready_source, promote_candidate
+from .registry import process_ready_source, promote_candidate, source_revision_key
 
 
 class RegistryValidationWorker:
@@ -72,11 +72,12 @@ class RegistryValidationWorker:
             raise ValueError("event is outside the registry source _READY protocol")
         version = unquote(subject[len(marker):-len("/_READY")])
         url_path = unquote(urlparse(data["url"]).path).lstrip("/")
-        if (
-            url_path != f"{self.source_container}/{self.source_prefix}/{version}/_READY"
-            or not SOURCE_REVISION_PATTERN.fullmatch(version)
-        ):
+        if url_path != f"{self.source_container}/{self.source_prefix}/{version}/_READY":
             raise ValueError("event subject and data.url disagree")
+        try:
+            source_revision_key(version)
+        except ValueError as exc:
+            raise ValueError("event has an invalid source revision") from exc
         return version
 
     def process_one(self, generated_on: date | None = None) -> bool:
@@ -183,18 +184,26 @@ class RegistryPromotionWorker:
             raise ValueError("event is outside the registry candidate _APPROVE protocol")
         version = unquote(subject[len(marker):-len("/_APPROVE")])
         url_path = unquote(urlparse(data["url"]).path).lstrip("/")
-        if (
-            url_path != f"{self.candidate_container}/{self.candidate_prefix}/{version}/_APPROVE"
-            or not SOURCE_REVISION_PATTERN.fullmatch(version)
-        ):
+        if url_path != f"{self.candidate_container}/{self.candidate_prefix}/{version}/_APPROVE":
             raise ValueError("event subject and data.url disagree")
+        try:
+            source_revision_key(version)
+        except ValueError as exc:
+            raise ValueError("event has an invalid export version") from exc
         return version
 
-    def _upload_current_pointer(self, pointer: Path) -> None:
+    def _upload_current_pointer(self, pointer: Path, version: str) -> None:
         client = self.blobs.get_blob_client(self.export_container, f"{self.candidate_prefix}/current.json")
         payload = pointer.read_bytes()
         if client.exists():
-            client.upload_blob(payload, overwrite=True, if_match=client.get_blob_properties().etag)
+            current = json.loads(client.download_blob().readall())
+            current_version = current.get("export_version")
+            if not isinstance(current_version, str):
+                raise ValueError("current.json has no valid export_version")
+            if source_revision_key(current_version) > source_revision_key(version):
+                raise ValueError("refusing to replace current.json with an older export")
+            if current_version != version:
+                client.upload_blob(payload, overwrite=True, if_match=client.get_blob_properties().etag)
         else:
             client.upload_blob(payload, overwrite=False, if_none_match="*")
 
@@ -219,6 +228,6 @@ class RegistryPromotionWorker:
             exports = root / "exports"
             destination = promote_candidate(candidate_directory=candidate, export_root=exports)
             self._upload_directory(self.export_container, export_prefix, destination)
-            self._upload_current_pointer(exports / self.candidate_prefix / "current.json")
+            self._upload_current_pointer(exports / self.candidate_prefix / "current.json", version)
         self.queue.delete_message(message.id, message.pop_receipt)
         return True
