@@ -26,6 +26,7 @@ AUDIT_COLUMNS = ("source_revision", "actor", "action", "project_id", "reason")
 VALID_STATUSES = frozenset({"eligible", "retired", "superseded"})
 VALID_AUDIT_ACTIONS = frozenset({"allocated", "retired", "superseded"})
 SOURCE_REVISION_PATTERN = re.compile(r"^\d{4}-\d{2}-\d{2}(?:-r[2-9][0-9]*)?$")
+SOURCE_FILENAMES = frozenset({"project-id-registry.csv", "registry-audit.csv", "_READY"})
 
 
 @dataclass(frozen=True)
@@ -58,6 +59,13 @@ def validate_source_revision(source_directory: Path, previous_directory: Path | 
     revision = source_directory.name
     errors: list[str] = []
     warnings: list[str] = []
+    actual_files = {path.name for path in source_directory.iterdir() if path.is_file()}
+    unexpected = actual_files - SOURCE_FILENAMES
+    if unexpected:
+        errors.append(f"Source revision contains unsupported files: {', '.join(sorted(unexpected))}.")
+    missing = SOURCE_FILENAMES - actual_files
+    if missing:
+        errors.append(f"Source revision is missing required files: {', '.join(sorted(missing))}.")
     projects: dict[str, dict[str, str]] = {}
     if not SOURCE_REVISION_PATTERN.fullmatch(revision):
         errors.append("Source revision must be YYYY-MM-DD or YYYY-MM-DD-r2 (or a later revision).")
@@ -134,6 +142,16 @@ def _sha256(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+def _read_json(path: Path) -> dict[str, object]:
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise ValueError(f"{path.name} is not valid JSON") from exc
+    if not isinstance(payload, dict):
+        raise ValueError(f"{path.name} must contain a JSON object")
+    return payload
+
+
 def _write_xlsx(path: Path, rows: list[dict[str, str]], generated_on: date) -> None:
     def cells(values: list[str], row: int) -> str:
         return "".join(
@@ -168,8 +186,20 @@ def process_ready_source(
     if not (source_directory / "_READY").is_file():
         raise ValueError("The source revision is not ready: _READY is required.")
     version = source_directory.name
-    result = validate_source_revision(source_directory, previous_directory)
     generated = generated_on.isoformat()
+    report_directory = report_root / "project-id-registry" / version
+    report_status = report_directory / "status.json"
+    if report_status.is_file():
+        report = _read_json(report_directory / "validation-report.json")
+        return ValidationResult(
+            rows=[],
+            errors=[str(error) for error in report.get("errors", [])],
+            warnings=[str(warning) for warning in report.get("warnings", [])],
+        )
+    try:
+        result = validate_source_revision(source_directory, previous_directory)
+    except (OSError, ValueError) as exc:
+        result = ValidationResult(rows=[], errors=[str(exc)], warnings=[])
     report = {
         "source_registry": "hrl-project-registry",
         "registry_contract_version": REGISTRY_CONTRACT_VERSION,
@@ -180,13 +210,15 @@ def process_ready_source(
         "errors": result.errors,
         "warnings": result.warnings,
     }
-    report_directory = report_root / "project-id-registry" / version
-    report_directory.mkdir(parents=True, exist_ok=False)
+    report_directory.mkdir(parents=True, exist_ok=True)
     (report_directory / "validation-report.json").write_text(json.dumps(report, indent=2) + "\n")
     if result.errors:
+        report_status.write_text('{"status":"NEEDS_CORRECTION"}\n')
         return result
     destination = candidate_root / "project-id-registry" / version
     destination.parent.mkdir(parents=True, exist_ok=True)
+    if (destination / "status.json").is_file():
+        return result
     if destination.exists():
         raise FileExistsError(f"Candidate already exists: {destination}")
     with tempfile.TemporaryDirectory(dir=destination.parent, prefix=".candidate-") as temporary:
@@ -211,9 +243,70 @@ def process_ready_source(
             "checksums": checksums,
         }
         (staging / "candidate-manifest.json").write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n")
-        (staging / "status.json").write_text('{"status":"AWAITING_APPROVAL"}\n')
+        (staging / "status.json").write_text(
+            json.dumps({"source_revision": version, "status": "AWAITING_APPROVAL"}, sort_keys=True) + "\n"
+        )
         (staging / "SHA256SUMS").write_text("".join(f"{digest}  {name}\n" for name, digest in sorted(checksums.items())))
         if any(_sha256(staging / name) != checksum for name, checksum in checksums.items()):
             raise RuntimeError("Candidate checksum verification failed.")
         shutil.move(str(staging), str(destination))
     return result
+
+
+def promote_candidate(*, candidate_directory: Path, export_root: Path) -> Path:
+    """Promote one reviewed candidate into an immutable registry export."""
+    status = _read_json(candidate_directory / "status.json")
+    if status.get("status") != "AWAITING_APPROVAL":
+        raise ValueError("candidate status must be AWAITING_APPROVAL")
+    manifest_path = candidate_directory / "candidate-manifest.json"
+    candidate_manifest = _read_json(manifest_path)
+    approval = _read_json(candidate_directory / "_APPROVE")
+    required = {"export_version", "approved_by", "approved_on", "candidate_manifest_sha256"}
+    if not required <= set(approval) or not all(isinstance(approval[key], str) and approval[key] for key in required):
+        raise ValueError("_APPROVE is missing required approval fields")
+    if not _is_iso_date(str(approval["approved_on"])):
+        raise ValueError("_APPROVE approved_on must be an ISO date")
+    if approval["export_version"] != candidate_manifest.get("export_version"):
+        raise ValueError("_APPROVE export_version does not match candidate manifest")
+    if approval["candidate_manifest_sha256"] != _sha256(manifest_path):
+        raise ValueError("_APPROVE candidate manifest checksum does not match")
+    checksums = candidate_manifest.get("checksums")
+    if not isinstance(checksums, dict) or set(checksums) != {
+        "project-id-registry.csv", "project-id-registry.json", "project-id-registry.xlsx"
+    }:
+        raise ValueError("candidate manifest has an invalid artifact checksum set")
+    for name, checksum in checksums.items():
+        if not isinstance(checksum, str) or _sha256(candidate_directory / name) != checksum:
+            raise ValueError(f"candidate artifact checksum does not match: {name}")
+    version = str(candidate_manifest.get("export_version", ""))
+    if not SOURCE_REVISION_PATTERN.fullmatch(version):
+        raise ValueError("candidate manifest has an invalid export_version")
+    if candidate_manifest.get("source_revision") != version:
+        raise ValueError("candidate manifest source_revision and export_version must match")
+    if status.get("source_revision") != version:
+        raise ValueError("candidate status source_revision does not match candidate manifest")
+    destination = export_root / "project-id-registry" / version
+    if destination.exists():
+        manifest = _read_json(destination / "manifest.json")
+        if manifest.get("checksums") != checksums:
+            raise ValueError("existing immutable export does not match candidate")
+        return destination
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(dir=destination.parent, prefix=".export-") as temporary:
+        staging = Path(temporary)
+        for name in sorted(checksums):
+            shutil.copy2(candidate_directory / name, staging / name)
+        manifest = {
+            **candidate_manifest,
+            "approved_by": approval["approved_by"],
+            "approved_on": approval["approved_on"],
+        }
+        (staging / "manifest.json").write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n")
+        (staging / "SHA256SUMS").write_text("".join(f"{digest}  {name}\n" for name, digest in sorted(checksums.items())))
+        shutil.move(str(staging), str(destination))
+    pointer = {"export_version": version, "manifest": f"{version}/manifest.json"}
+    pointer_path = destination.parent / "current.json"
+    temporary_pointer = destination.parent / ".current.json.tmp"
+    temporary_pointer.write_text(json.dumps(pointer, indent=2, sort_keys=True) + "\n")
+    temporary_pointer.replace(pointer_path)
+    return destination
