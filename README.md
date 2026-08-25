@@ -12,29 +12,29 @@ pytest
 ruff check .
 ```
 
-Do not commit local database files, production IDs, exports, credentials, or `.env` files.
+Do not commit local registry artifacts, production IDs, exports, credentials, or `.env` files.
 
 ## Releasing the container image
 
-The `Release container image` workflow is manual and uses GitHub Actions OIDC
-workload identity; it does not use an ACR password, client secret, or a stored
-registry credential. Before enabling it, configure the protected
+The `Release container image` workflow is manual and uses a dedicated Azure
+service principal whose JSON credential is stored only as a protected GitHub
+Environment secret. It does not use an ACR password or storage credential.
+Before enabling it, configure the protected
 `acr-publish` GitHub Environment with required reviewers and these environment
 variables:
 
 ```text
 ACR_NAME                 # Registry resource name, without .azurecr.io
 ACR_LOGIN_SERVER         # For example: example.azurecr.io
-AZURE_CLIENT_ID          # Federated workload identity client ID
-AZURE_TENANT_ID
-AZURE_SUBSCRIPTION_ID
+AZURE_CREDENTIALS        # JSON service-principal credential Environment secret
 ```
 
-Grant that federated identity the narrowly scoped ACR publishing role approved
-by the platform team. Bind its GitHub OIDC federated credential to this
-repository's `acr-publish` environment, and protect both that environment and
-the default branch with the required reviewers. The workflow rejects releases
-from any other branch. It runs the tests and lint, builds the image, then
+Grant that service principal the narrowly scoped ACR publishing role approved
+by the platform team. Give its client secret a recorded expiry and rotation
+owner, store it only in this repository's protected `acr-publish` environment,
+and protect both that environment and the default branch with the required
+reviewers. The workflow rejects releases from any other branch. It runs the
+tests and lint, builds the image, then
 pushes a commit-tagged image and records the resolved immutable
 `<registry>/hrl-project-registry@sha256:...` reference. It uploads that
 reference and release provenance as the `image-release-handoff` artifact.

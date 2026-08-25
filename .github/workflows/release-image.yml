@@ -5,7 +5,6 @@ on:
 
 permissions:
   contents: read
-  id-token: write
 
 env:
   IMAGE_REPOSITORY: hrl-project-registry
@@ -48,12 +47,10 @@ jobs:
           IMAGE_TAG: ${{ vars.ACR_LOGIN_SERVER }}/${{ env.IMAGE_REPOSITORY }}:${{ github.sha }}
         run: docker build --tag "$IMAGE_TAG" .
 
-      - name: Authenticate to Azure with workload identity
+      - name: Authenticate to Azure with the release service principal
         uses: azure/login@v2
         with:
-          client-id: ${{ vars.AZURE_CLIENT_ID }}
-          tenant-id: ${{ vars.AZURE_TENANT_ID }}
-          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
 
       - name: Log in to Azure Container Registry
         run: az acr login --name "${{ vars.ACR_NAME }}"
