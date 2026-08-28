@@ -1,91 +1,58 @@
 from __future__ import annotations
 
-from datetime import date
+import argparse
+import sys
 from pathlib import Path
 
-import typer
-from .registry import process_ready_source, promote_candidate
+from .registry import validate_file
 
-app = typer.Typer(no_args_is_help=True)
-
-
-def _parse_date(value: str | None) -> date | None:
-    if value is None:
-        return None
-    try:
-        return date.fromisoformat(value)
-    except ValueError as exc:
-        raise typer.BadParameter("must be an ISO date (YYYY-MM-DD)") from exc
+DEFAULT_REGISTRY = Path("project-id-registry.csv")
 
 
-@app.command("process-ready-source")
-def process_ready_source_command(
-    source_directory: Path = typer.Option(..., help="Downloaded source-revision directory containing _READY."),
-    report_root: Path = typer.Option(...),
-    candidate_root: Path = typer.Option(...),
-    previous_directory: Path | None = typer.Option(None),
-    generated_on: str | None = typer.Option(None, help="Optional provenance date (YYYY-MM-DD)."),
-) -> None:
-    """Validate an uploaded `_READY` revision and create an approval candidate when valid."""
-    result = process_ready_source(
-        source_directory=source_directory,
-        report_root=report_root,
-        candidate_root=candidate_root,
-        previous_directory=previous_directory,
-        generated_on=_parse_date(generated_on) or date.today(),
+def _build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        prog="hrl-project-registry",
+        description="Validate the HRL program-assigned project-ID registry.",
     )
+    sub = parser.add_subparsers(dest="command", required=True)
+
+    validate = sub.add_parser(
+        "validate", help="Validate project-id-registry.csv, and the change from --base when given."
+    )
+    validate.add_argument(
+        "path",
+        nargs="?",
+        type=Path,
+        default=DEFAULT_REGISTRY,
+        help="Path to project-id-registry.csv (default: %(default)s).",
+    )
+    validate.add_argument(
+        "--base",
+        type=Path,
+        default=None,
+        help="Prior approved project-id-registry.csv to check the change against "
+        "(in CI, the copy from origin/main).",
+    )
+    return parser
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = _build_parser().parse_args(argv)
+
+    result = validate_file(args.path, args.base)
+
+    for warning in result.warnings:
+        print(f"warning: {warning}", file=sys.stderr)
+
     if result.errors:
-        typer.echo("Registry source validation failed.", err=True)
-        raise typer.Exit(code=1)
-    typer.echo("Registry candidate is awaiting approval.")
+        for error in result.errors:
+            print(f"error: {error}", file=sys.stderr)
+        print(f"\n{len(result.errors)} error(s); registry is invalid.", file=sys.stderr)
+        return 1
+
+    print(f"OK: {len(result.rows)} project ID(s), no errors.")
+    return 0
 
 
-@app.command("promote")
-def promote_command(
-    candidate_directory: Path = typer.Option(..., help="Reviewed candidate directory containing _APPROVE."),
-    export_root: Path = typer.Option(...),
-) -> None:
-    """Promote a reviewed registry candidate into its immutable export directory."""
-    destination = promote_candidate(candidate_directory=candidate_directory, export_root=export_root)
-    typer.echo(f"Published immutable registry export: {destination}")
-
-
-@app.command("consume-validation-queue")
-def consume_validation_queue_command(
-    account_url: str = typer.Option(..., envvar="HRL_STORAGE_ACCOUNT_URL"),
-    queue: str = typer.Option(...),
-    source_container: str = typer.Option(...),
-    report_container: str = typer.Option(...),
-    candidate_container: str = typer.Option(...),
-    export_container: str = typer.Option(...),
-    source_prefix: str = typer.Option("project-id-registry/source-revisions"),
-    generated_on: str | None = typer.Option(None, help="Optional provenance date (YYYY-MM-DD)."),
-) -> None:
-    """Receive, process, and acknowledge one registry source-revision message."""
-    from .azure_worker import RegistryValidationWorker
-
-    worker = RegistryValidationWorker(account_url, queue, source_container, report_container, candidate_container, export_container, source_prefix)
-    if not worker.process_one(_parse_date(generated_on)):
-        typer.echo("No queue message available.")
-
-
-@app.command("consume-promotion-queue")
-def consume_promotion_queue_command(
-    account_url: str = typer.Option(..., envvar="HRL_STORAGE_ACCOUNT_URL"),
-    queue: str = typer.Option(...),
-    candidate_container: str = typer.Option(...),
-    export_container: str = typer.Option(...),
-    candidate_prefix: str = typer.Option("project-id-registry"),
-) -> None:
-    """Receive, promote, and acknowledge one approved registry candidate message."""
-    from .azure_worker import RegistryPromotionWorker
-
-    worker = RegistryPromotionWorker(
-        account_url,
-        queue,
-        candidate_container,
-        export_container,
-        candidate_prefix,
-    )
-    if not worker.process_one():
-        typer.echo("No queue message available.")
+if __name__ == "__main__":
+    raise SystemExit(main())

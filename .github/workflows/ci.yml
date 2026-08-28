@@ -30,11 +30,32 @@ jobs:
       - name: Lint
         run: ruff check .
 
-  docker:
-    name: Build Docker image
+  registry:
+    name: Validate project-id-registry.csv
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
-      - name: Build image
-        run: docker build --tag hrl-project-registry:ci .
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install package
+        run: python -m pip install --upgrade pip && python -m pip install .
+
+      - name: Materialize the base registry (origin/main)
+        id: base
+        run: |
+          set -euo pipefail
+          if git rev-parse --verify --quiet origin/main >/dev/null \
+             && git cat-file -e origin/main:project-id-registry.csv 2>/dev/null; then
+            git show origin/main:project-id-registry.csv > /tmp/base-registry.csv
+            echo "flag=--base /tmp/base-registry.csv" >> "$GITHUB_OUTPUT"
+          else
+            echo "flag=" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Validate
+        run: hrl-project-registry validate project-id-registry.csv ${{ steps.base.outputs.flag }}
