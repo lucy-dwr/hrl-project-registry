@@ -1,3 +1,3 @@
-"""CSV validation and immutable publishing tools for the HRL project registry."""
+"""The HRL program-assigned project-ID registry and its validator."""
 
-REGISTRY_CONTRACT_VERSION = "1.0"
+REGISTRY_CONTRACT_VERSION = "2.0"
