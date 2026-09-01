@@ -3,8 +3,15 @@
 The authoritative list of program-assigned HRL restoration project IDs, kept as
 one reviewed CSV under version control.
 
-Cross-repository workflow reference:
-[`hrl-azure-infrastructure/PIPELINE_INFRA.md`](https://github.com/lucy-dwr/hrl-azure-infrastructure/blob/main/PIPELINE_INFRA.md).
+- **Need a new project ID?** &rarr; [Adding a project ID](#adding-a-project-id)
+  (the data operator can do this; no coding needed).
+- **Retiring or superseding an ID?** &rarr;
+  [Retiring or superseding a project ID](#retiring-or-superseding-a-project-id)
+  (technical maintainer only).
+- **Roles and ownership:**
+  [`hrl-azure-infrastructure/DIVISION_OF_RESPONSIBILITIES.md`](https://github.com/Healthy-Rivers-and-Landscapes-Science/hrl-azure-infrastructure/blob/main/DIVISION_OF_RESPONSIBILITIES.md).
+- **Cross-repository workflow reference:**
+  [`hrl-azure-infrastructure/PIPELINE_INFRA.md`](https://github.com/Healthy-Rivers-and-Landscapes-Science/hrl-azure-infrastructure/blob/main/PIPELINE_INFRA.md).
 
 ## The registry
 
@@ -26,20 +33,76 @@ There is no separate audit file, no database, no immutable export, and no
 Azure service. **The pull request that changes the CSV is the audit record** —
 put the who and the why in the PR description and commit message.
 
-## Changing the registry
+## Adding a project ID
 
-1. Branch. Edit `project-id-registry.csv`.
-   - Allocate an ID: add one row with the next `HRL-NNN`, `status=eligible`,
-     the project name, the lead organization's abbreviation, and today's date.
-   - Retire or supersede an ID: change only its `status` (and
-     `superseded_by_project_id` for a supersession). Keep every other row
-     byte-for-byte.
-2. Open a PR. Describe who authorized the change and why.
-3. CI runs `hrl-project-registry validate` on the file and on the change from
-   `origin/main`. Merge when it passes and a maintainer approves.
+A submission is blocked until the project ID it uses exists here as an
+`eligible` row. The data operator can add it directly through the GitHub
+website &mdash; no local setup, no command line.
+
+1. Open
+   [`project-id-registry.csv`](project-id-registry.csv) on GitHub and click the
+   pencil (**Edit this file**).
+2. Add **one row at the end**, using the next number in sequence. Columns are
+   `project_id,status,project_name,assigned_organization_code,assigned_at,superseded_by_project_id`.
+
+   ```diff
+     HRL-036,eligible,Upper Rose Bar Habitat Enhancement Project,YWA,2026-08-24,
+   + HRL-037,eligible,Cache Slough Tidal Restoration,DWR,2026-09-15,
+   ```
+
+   - `project_id` &mdash; `HRL-` plus the next zero-padded number. Never reuse a
+     number, even one that was retired.
+   - `status` &mdash; `eligible`.
+   - `project_name` &mdash; the project's name as the program refers to it.
+   - `assigned_organization_code` &mdash; the lead organization's uppercase
+     abbreviation. Use the same code that appears in the schema's lead-entity
+     catalog (`LeadEntityEnum` in
+     [`hrl-restoration-schema`](https://github.com/Healthy-Rivers-and-Landscapes-Science/hrl-restoration-schema)).
+   - `assigned_at` &mdash; today's date, `YYYY-MM-DD`.
+   - `superseded_by_project_id` &mdash; leave empty.
+3. Below the editor, choose **Create a new branch and start a pull request**.
+   In the description, write **who asked for the ID and why** (this is the
+   entire audit record).
+4. CI validates the file automatically. When it passes and the technical
+   maintainer approves and merges, `git pull` the registry locally and re-run
+   `hrl-pipeline`.
+
+## Retiring or superseding a project ID
+
+**Technical maintainer only.** These are terminal status changes with rules the
+validator enforces.
+
+- **Retire** an ID that will never be used: change only its `status` to
+  `retired`.
+
+  ```diff
+  - HRL-030,eligible,Duplicate entry for River Bend,WF,2026-08-24,
+  + HRL-030,retired,Duplicate entry for River Bend,WF,2026-08-24,
+  ```
+
+- **Supersede** an ID that has been replaced by another: set its `status` to
+  `superseded` and put the replacement ID in `superseded_by_project_id`. The
+  replacement must already exist as an `eligible` row.
+
+  ```diff
+  - HRL-031,eligible,Upper River Bend (Phase 1),WF,2026-08-24,
+  + HRL-031,superseded,Upper River Bend (Phase 1),WF,2026-08-24,HRL-032
+  ```
+
+Keep every other row byte-for-byte. `assigned_at` is immutable. A `retired` or
+`superseded` ID cannot revert or change again. Open a pull request with the
+authorization and reason.
+
+## Who reviews changes
+
+The **technical maintainer** reviews and merges every pull request against
+`project-id-registry.csv` &mdash; including the operator's ID additions. A
+blocked submission is waiting on that merge, so treat it as time-sensitive. See
+the owner table in
+[`hrl-azure-infrastructure/MAINTENANCE.md`](https://github.com/Healthy-Rivers-and-Landscapes-Science/hrl-azure-infrastructure/blob/main/MAINTENANCE.md).
 
 The restoration pipeline reads this file pinned at a specific commit; it never
-follows `main`.
+follows `main`, so a merge does not take effect until the operator pulls it.
 
 ## Local development
 

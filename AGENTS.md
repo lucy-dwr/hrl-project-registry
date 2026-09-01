@@ -7,7 +7,13 @@ reviewed CSV: `project-id-registry.csv`. Plus a small Python validator run in
 CI. That is the whole repository.
 
 Cross-repository context is in
-[`hrl-azure-infrastructure/PIPELINE_INFRA.md`](https://github.com/lucy-dwr/hrl-azure-infrastructure/blob/main/PIPELINE_INFRA.md).
+[`hrl-azure-infrastructure/PIPELINE_INFRA.md`](https://github.com/Healthy-Rivers-and-Landscapes-Science/hrl-azure-infrastructure/blob/main/PIPELINE_INFRA.md);
+role ownership is in
+[`hrl-azure-infrastructure/DIVISION_OF_RESPONSIBILITIES.md`](https://github.com/Healthy-Rivers-and-Landscapes-Science/hrl-azure-infrastructure/blob/main/DIVISION_OF_RESPONSIBILITIES.md).
+
+The data operator may add `eligible` rows through the GitHub web UI and open a
+pull request; the technical maintainer reviews and merges every change and does
+all retirements and supersessions. See the README.
 
 ## History (do not rebuild)
 
