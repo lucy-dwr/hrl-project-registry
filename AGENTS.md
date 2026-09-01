@@ -21,7 +21,7 @@ This repo previously contained an Azure service: source-revision directories,
 an append-only `registry-audit.csv`, Container Apps queue workers
 (`azure_worker.py`), a Dockerfile, immutable CSV/JSON/XLSX exports, a
 `current.json` pointer, and an image-release workflow. All of that was removed
-in favour of one version-controlled CSV whose audit trail is the pull-request
+in favor of one version-controlled CSV whose audit trail is the pull-request
 history. Do not reintroduce it.
 
 ## Rules

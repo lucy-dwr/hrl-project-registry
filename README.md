@@ -21,23 +21,23 @@ one reviewed CSV under version control.
 project_id,status,project_name,assigned_organization_code,assigned_at,superseded_by_project_id
 ```
 
-- `project_id` — `HRL-` plus a zero-padded number, e.g. `HRL-003`. Never reused,
+- `project_id` - `HRL-` plus a zero-padded number, e.g. `HRL-003`. Never reused,
   never removed.
-- `status` — `eligible`, `retired`, or `superseded`. `retired` and `superseded`
+- `status` - `eligible`, `retired`, or `superseded`. `retired` and `superseded`
   are terminal.
-- `assigned_at` — ISO date; immutable once set.
-- `superseded_by_project_id` — required when and only when `status` is
+- `assigned_at` - ISO date; immutable once set.
+- `superseded_by_project_id` - required when and only when `status` is
   `superseded`; must point at an `eligible` ID.
 
 There is no separate audit file, no database, no immutable export, and no
-Azure service. **The pull request that changes the CSV is the audit record** —
+Azure service. **The pull request that changes the CSV is the audit record** -
 put the who and the why in the PR description and commit message.
 
 ## Adding a project ID
 
 A submission is blocked until the project ID it uses exists here as an
 `eligible` row. The data operator can add it directly through the GitHub
-website &mdash; no local setup, no command line.
+website - no local setup, no command line.
 
 1. Open
    [`project-id-registry.csv`](project-id-registry.csv) on GitHub and click the
@@ -50,16 +50,16 @@ website &mdash; no local setup, no command line.
    + HRL-037,eligible,Cache Slough Tidal Restoration,DWR,2026-09-15,
    ```
 
-   - `project_id` &mdash; `HRL-` plus the next zero-padded number. Never reuse a
+   - `project_id` - `HRL-` plus the next zero-padded number. Never reuse a
      number, even one that was retired.
-   - `status` &mdash; `eligible`.
-   - `project_name` &mdash; the project's name as the program refers to it.
-   - `assigned_organization_code` &mdash; the lead organization's uppercase
+   - `status` - `eligible`.
+   - `project_name` - the project's name as the program refers to it.
+   - `assigned_organization_code` - the lead organization's uppercase
      abbreviation. Use the same code that appears in the schema's lead-entity
      catalog (`LeadEntityEnum` in
      [`hrl-restoration-schema`](https://github.com/Healthy-Rivers-and-Landscapes-Science/hrl-restoration-schema)).
-   - `assigned_at` &mdash; today's date, `YYYY-MM-DD`.
-   - `superseded_by_project_id` &mdash; leave empty.
+   - `assigned_at` - today's date, `YYYY-MM-DD`.
+   - `superseded_by_project_id` - leave empty.
 3. Below the editor, choose **Create a new branch and start a pull request**.
    In the description, write **who asked for the ID and why** (this is the
    entire audit record).
@@ -96,7 +96,7 @@ authorization and reason.
 ## Who reviews changes
 
 The **technical maintainer** reviews and merges every pull request against
-`project-id-registry.csv` &mdash; including the operator's ID additions. A
+`project-id-registry.csv` - including the operator's ID additions. A
 blocked submission is waiting on that merge, so treat it as time-sensitive. See
 the owner table in
 [`hrl-azure-infrastructure/MAINTENANCE.md`](https://github.com/Healthy-Rivers-and-Landscapes-Science/hrl-azure-infrastructure/blob/main/MAINTENANCE.md).
